@@ -25,14 +25,11 @@ tv_grab_in --list-channels [--config-file FILE]
                 
 =head1 DESCRIPTION
 
-Outputs TV listings in XMLTV format for stations
-available in North America. Data is provided by TVMedia Inc.
-
-The grabber requires an _active_ subscription to XMLTVListings.com, as well as at least one lineup selected from your account page.
-Then you can run B<tv_grab_in --configure> to set your API key and which lineup you want to receive.
+Outputs TV listings in XMLTV format for stations available in 
+India. 
 
 Then running B<tv_grab_in> with no arguments will get listings for
-all the channels you in your lineup, as you configured on XMLTVListings.com
+all the channels.
 
 =head1 OPTIONS
 
@@ -252,11 +249,14 @@ sub transform_program
 		my $program = $c->{"programme"};
 		foreach my $p (@$program) {
 
+			my $lang = "en";
 			my %prog = (channel =>  $c->{"-id"}, 
 				start => $p->{"start"},
 				stop => $p->{"stop"},
+				category => [ [$p->{"subgenre"}, $lang] ],
+				icon => [ { src => $p->{"programmeurl"}} ],
 				date => $p->{"date"},
-				title => [ [ $p->{"title"}, 'en' ] ]);
+				title => [ [ $p->{"title"}, $lang ] ]);
 			$writer->write_programme(\%prog);
 	}
 	}
