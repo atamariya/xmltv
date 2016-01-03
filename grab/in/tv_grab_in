@@ -1,545 +1,312 @@
 #!/usr/bin/perl -w
 
+eval 'exec /usr/bin/perl -w -S $0 ${1+"$@"}'
+    if 0; # not running under some shell
+
 =pod
 
 =head1 NAME
 
-tv_grab_in - Grab TV listings for India using WhatsOn.
+tv_grab_in - Grab TV listings for India from Times Of India website 
 
 =head1 SYNOPSIS
 
-    tv_grab_in --help
+tv_grab_in --help
 
-    tv_grab_in --version
+tv_grab_in --configure [--config-file FILE]
 
-    tv_grab_in --capabilities
+tv_grab_in [--config-file FILE]
+                 [--days N] [--offset N]
+                 [--output FILE] [--quiet]
 
-    tv_grab_in --configure [--config-file FILE]
-                                [--auto-config add|ignore]
-                              [--gui OPTION]
-
-    tv_grab_in --list-lineups [--config-file FILE] [--dd-data FILE]
-                                 [--reprocess]
-
-    tv_grab_in [--config-file FILE] [--dd-data FILE]
-                  [--auto-config add|ignore]
-                  [--days N] [--offset N] [--quiet] [--notrim]
-                  [--output FILE]
-                  [--list-channel]
-
+tv_grab_in --list-channels [--config-file FILE]
+                 [--output FILE] [--quiet]
+                 
+                
 =head1 DESCRIPTION
 
-This script downloads TV listings using What's On's XMLTV data service.
+Outputs TV listings in XMLTV format for stations
+available in North America. Data is provided by TVMedia Inc.
 
-To obtain a free password:
+The grabber requires an _active_ subscription to XMLTVListings.com, as well as at least one lineup selected from your account page.
+Then you can run B<tv_grab_in --configure> to set your API key and which lineup you want to receive.
 
-  1.	Connect to http://www.whatsonindia.com and register yourself
-  2.	During registration, please check the "sign-up for XMLTV" option (Under TV Preferences)
-  3.	Once done, click on submit your information.
+Then running B<tv_grab_in> with no arguments will get listings for
+all the channels you in your lineup, as you configured on XMLTVListings.com
 
-Once you've registered, you can use --configure
+=head1 OPTIONS
 
-=head1 Stand-alone options
+B<--configure> Prompt for which stations to download and write the
+configuration file.
 
-=over
+B<--config-file FILE> Set the name of the configuration file, the
+default is B<~/.xmltv/tv_grab_in.conf>. This is the file written by
+B<--configure> and read when grabbing.
 
-=item --help
+B<--output FILE> When grabbing, write output to FILE rather than
+standard output.
 
-Print a help message and exit.
+B<--days N> When grabbing, grab N days rather than 5.
 
-=item --version
+B<--offset N> Start grabbing at today + N days. Also supports negative offset for past listings.
 
-Show the version of the grabber.
+B<--quiet> Only print error-messages on STDERR.
 
-=item --capabilities
+B<--debug> Provide more information on progress to stderr to help in
+debugging.
 
-Show which capabilities the grabber supports. For more
+B<--list-channels> Output a list of all channels that data is available
+                      for. The list is in xmltv-format.
+
+B<--capabilities> Show which capabilities the grabber supports. For more
 information, see L<http://wiki.xmltv.org/index.php/XmltvCapabilities>
 
-=back
+B<--version> Show the version of the grabber.
 
-=head1 Mode selection (default is grab mode)
+B<--help> Print a help message and exit.
 
-=over
+=head1 ERROR HANDLING
 
-=item --configure
+If the grabber fails to download data, it will print an
+errormessage to STDERR and then exit with a status code of 1 to indicate
+that the data is missing.
 
-Activates configure mode.  If a config file already exists the values
-are used as defaults.
+=head1 CREDITS
 
-=item --gui OPTION
+Grabber written by Anand Tamariya, atamariya@gmail.com
+This documentation copied from tv_grab_cz,
+This code modified from tv_grab_cz, by Mattias Holmlund, mattias -at- holmlund -dot- se.
+L<http://wiki.xmltv.org/index.php/HowtoWriteAGrabber>
 
-Use this option to enable a graphical interface to be used.
-OPTION may be 'Tk', or left blank for the best available choice.
-Additional allowed values of OPTION are 'Term' for normal terminal output
-(default) and 'TermNoProgressBar' to disable the use of Term::ProgressBar.
+=head1 BUGS
 
-=item --list-lineups
-
-Lists available lineups.
-
-=back
-
-=head1 General Options
-
-=over
-
-=item --config-file
-I<file>
-
-Set the name of the configuration file, the default is B<~/.xmltv/tv_grab_in.conf>.
-This is the file created during L</--configure> mode.
-
-=item --auto-config I<add|ignore>
-
-When used in --configure mode, updates the config file, removing old channels, and adding or
-ignoring new channels.  Prompts are skipped if defaults are available in the current config file.
-
-When used in grab mode, appends new channels to the config file.
-
-=back
-
-=head1 Grabber Mode options
-
-=over
-
-=item --days I<n>
-
-Grab I<n> days.  The default is 7.
-
-=item --offset I<n>
-
-Start N days after the default.
-
-=item --quiet
-
-Suppress some messages normally written to standard error.
-
-=item --output I<file>
-
-Write xml to I<file> rather than standard output.
-
-=item --list-channel
-
-Same as B<--days> 0
-
-=back
-
-=head1 SEE ALSO
-
-L<xmltv>.
-
-=head1 Author
-
-Author/Maintainer: Robert Eden, rmeden@yahoo.com
+None known.
 
 =cut
 
-#################################################################
-# initializations
-
 use strict;
-use XMLTV::Version '$Id: tv_grab_in,v 1.13 2010/09/28 06:22:35 rmeden Exp $ ';
-use XMLTV::Capabilities qw/baseline manualconfig preferredmethod/;
-use XMLTV::Description 'India (Whats On)';
-use XMLTV::PreferredMethod 'allatonce';
-use Data::Dumper;
-use Date::Manip;
-use Getopt::Long;
-use IO::Scalar;
+use XMLTV::Configure::Writer;
+use XMLTV::Options qw/ParseOptions/;
 use XML::LibXML;
+use LWP::Simple;
+use Date::Calc qw(Add_Delta_Days);
+use URI::Escape qw(uri_escape);
+use JSON;
+use Data::Dumper;
 
-use XMLTV;
-use XMLTV::Ask;
-use XMLTV::Config_file;
-use XMLTV::Get_nice;
-use XMLTV::Memoize;
-use XMLTV::ProgressBar;
-use XMLTV::Gunzip;
+# config vars
+my $webroot = "http://timesofindia.indiatimes.com/";
+my $loginURL = "http://timesofindia.indiatimes.com/";
 
-use XMLTV::Usage <<END
-$0: get listings via Whats On
-in XMLTV format
+my( $opt, $conf ) = ParseOptions( {
+     grabber_name => "tv_grab_in",
+     capabilities => [qw/baseline manualconfig apiconfig/],
+     stage_sub => \&config_stage,
+     listchannels_sub => \&list_channels,
+     version => '$Id: tv_grab_in,v 1.2 2015/06/27 00:30:54 knowledgejunkie Exp $',
+     description => "India (timesofindia.indiatimes.com)",
+} );
 
-    tv_grab_in --help
+# make URL
+my @channels = @{$conf->{channel}};
+my $channels_str = join ",", @channels;
+my $url = buildURL( 'get_schedule', $conf, $opt, $channels_str );
 
-    tv_grab_in --version
+# fetch data
+my $res = get( $url );
+my $res1 = transform_channel($channels_str);
+$res = transform_program($res, $res1);
 
-    tv_grab_in --capabilities
+# validate XML
+my $parser = new XML::LibXML;
+eval { $parser->parse_string( $res )->is_valid };
 
-    tv_grab_in --configure [--config-file FILE] [--auto-config add|ignore]
-                              [--gui OPTION]
-
-    tv_grab_in --list-lineups [--config-file FILE]
-
-    tv_grab_in [--config-file FILE] [--auto-config add|ignore]
-                  [--days N] [--offset N] [--quiet]
-                  [--output FILE]
-                  [--list-channel]
-
-END
-;
-
-#
-# module version checking doesn't work with XMLTV version numbers
-#
-die "ERROR: XMLTV.PM 0.5.32 required\n" if $XMLTV::VERSION lt '0.5.32';
-
-#
-# Global Vars
-#
-my @messages;           # DD warnings.
-my %chan_config;        # Active/inactive channels.
-my %chan_id;            # quick channel id lookup
-my %station;            # DD station data
-my %lineups;            # DD channel mapping data
-my %program;            # DD program data
-my %crew;               # DD crew data
-my %programGenre;       # DD Genre data
-my @schedules;          # DD schedule list
-
-my $bar;                # handle for status bar
-my $DEBUG          =0;  # debug mode
-my $config_file;        # config file name
-my $start_time=time();
-my $sched_count=0;       # record count;
-my %old_lineups=();      # used for DD schema 1.2 -> 1.3 migration
-my %icons=();            # holds icons (if present)
-
-my $opt_help;           # ask for help
-my $opt_configure;      # configure mode
-my $opt_config_file ;   # config_file_name
-my $opt_gui ;           # use a gui for configuration
-my $opt_output;         # output name
-my $opt_days       =7;  # days to fetch
-my $opt_offset     =0;  # day to start
-my $opt_quiet      =0;  # supress messages
-my $opt_lineup     =''; # 
-my $opt_user       =''; # 
-my $opt_pass       =''; # 
-my $opt_list_channels='';
-my $opt_list_lineups='' ;
-my $opt_auto_config='';
-my $lineup_url ='';     # lineup url from conifg file
-my $opt_lineup_url =''; # override url from config file
-
-my $lineups={};
-my $guide_data={};
-select STDERR; $|=1;
-select STDOUT; $|=1;
-$XMLTV::Get_nice::Delay=0;
-XMLTV::Memoize::check_argv('XMLTV::Get_nice::get_nice_aux');
-
-#
-# Process command line
-#
-foreach (@ARGV) {
-    tr/_/-/ if /^--/; # older option style
+if ($@) {
+	#XML invalid - assume error and print $res to STDERR
+	print STDERR "Invalid XML: $res \n";
+	exit 1;
+} else {
+	# XML Valid, print to STDOUT and let XMLTV::Options handle it
+	print $res;
+	exit 0;
 }
-GetOptions(
-    	   'config-file=s' => \$opt_config_file,
-           'help'          => \$opt_help,
-    	   'gui:s'         => \$opt_gui,
-    	   'quiet'         => \$opt_quiet,
-    	   'configure'     => \$opt_configure,
-    	   'config=s'      => \$opt_config_file,
-    	   'output=s'      => \$opt_output,
-           'days=i'        => \$opt_days,
-    	   'offset=i'      => \$opt_offset,
-    	   'lineup=s'      => \$opt_lineup,
-           'list-channels' => \$opt_list_channels,
-           'list-lineups'  => \$opt_list_lineups,
-           'debug'         => \$DEBUG,
-	  )
-  or usage(0);
-usage(1) if $opt_help;
-die "ERROR: number of days must not be negative\n"         if ($opt_days < 0);
 
-$opt_days    = 0 if $opt_configure || $opt_list_channels || $opt_list_lineups;
-$config_file = XMLTV::Config_file::filename($opt_config_file, 'tv_grab_in' , $opt_quiet);
-XMLTV::Ask::init($opt_gui);
-
-########################################################################
-#
-# Load config file
-#
-if (-e $config_file && ( !$opt_configure || -s $config_file ))
+sub config_stage
 {
-    foreach (XMLTV::Config_file::read_lines($config_file))
-    {
-        next unless defined $_;
-        chomp;
-        my( $setting, $val ) = split( /:\s+/o, $_, 2 );
-
-        if ( $setting =~ /^(not )?channel$/o )
-        {
-            $chan_config{$val} = $1 ? 0 : 1;
-        }
-        elsif ( $setting eq 'lineup' )
-        {
-            $opt_lineup = $val;
-        }
-        elsif ( $setting eq 'user' )
-        {
-            $opt_user = $val;
-        }
-        elsif ( $setting eq 'pass' )
-        {
-            $opt_pass = $val;
-        }
-        elsif ( $setting eq 'auto-config' )
-        {
-            $opt_auto_config = $val;
-        }
-        else
-        {
-            warn "WARNING: Unknown setting: $setting, skipping.\n";
-        }
-    }
-} # load config file
-
-#-------------------------------------------------------------------------------
-# get_nice_gzip
-#-------------------------------------------------------------------------------
-# desc          : get url with get_nice, check for gzip encoding, return
-#                 decoded if necessary
-# arguments     : url to fetch from
-# returns       : html as scalar
-#-------------------------------------------------------------------------------
-sub get_nice_gzip( $ ) {
-    printf STDERR "downloading %s\n",($DEBUG?$_[0]:"data") unless  $opt_quiet;
-    my $data = get_nice($_[0]);
-    printf STDERR "downloaded %s bytes\n",length($data) unless $opt_quiet;
-    # Use heuristics to check for valid html
-
-    if ((ord(substr($data,0,1)))!= 31)  {
-        print STDERR "ERROR: Data Not Gzipped! Message Follows:\n$data\n";
-        exit 99;
-    }
-    if ($data =~ /<html|<head|<body|<table|<div|<tv|<lineup/i) {
-        return $data;
-    }
-    print STDERR "content is gzipped, deflating\n" if $DEBUG;
-    return gunzip($data);
+	my( $stage, $conf ) = @_;
+	my $result;
+	 
+	my $writer = new XMLTV::Configure::Writer( OUTPUT => \$result );
+	 
+	if( $stage eq 'start' ) {
+		$writer->start( { grabber => 'tv_grab_in' } );
+		$writer->end( 'select-channels' );
+	} elsif( $stage eq 'two' ) {
+		$writer->start( { grabber => 'tv_grab_in' } );
+		
+		my $parser = new XML::LibXML;
+		
+		# fetch XML lineup tree
+		my $raw = get( $webroot . 'get_lineups/' . $conf->{'apikey'}->[0] );
+		
+		if( !defined $raw ) {
+			die 'request failed';
+		}
+		
+		my $xmlTree = $parser->parse_string( $raw );
+		my $root = $xmlTree->getDocumentElement();
+		
+		# get each lineup element
+		my @kids = $root->childNodes();
+		my $size = @kids;
+		
+		if( $size == 0 ) {
+			die "You have no lineups associated with your API Key, or your key is invalid. Please login to ($loginURL) and select at least one lineup before continuing.";
+		}
+		
+		$writer->start_selectone( {
+			id => 'lineup',
+			title => [ [ 'Lineup', 'en' ] ],
+			description => [ [ "Choose one of your lineups. You can add or modify lineups from your account page ($loginURL)", 'en' ] ],
+		} );
+		
+		# create option for each lineup element
+		foreach my $child (@kids)
+		{
+			my $lineupName = $child -> textContent;
+			my $lineupId = $child -> getAttribute('id');
+			
+			$writer->write_option( {
+				value => $lineupId,
+				text=> => [ [ $lineupName, 'en' ] ]
+			} );
+		}
+		
+		$writer->end_selectone();
+		$writer->end( 'select-channels' );
+		
+		
+	  } else {
+		die "Unknown stage $stage";
+	  }
+	
+     return $result;
 }
 
-#
-# get lineups
-#
-sub get_lineups {
-    return 0 if (keys %lineups);
-    my $content=get_nice("http://www.whatsonindia.com/XMLTV_Download/FileDeliver.aspx?formatlineup=true");
-    die "Error fetching lineup list " unless $content;
-    my $parser = XML::LibXML->new();
-    my $doc = $parser->parse_string( $content );
-    my $root = $doc->getDocumentElement;
-
-    foreach my $lineup ($root->findnodes('formatname')) {
-       my $name = $lineup->getFirstChild->getData;
-       $lineups{$name}=$name;
-    }
-} # get_lineups
-
-#
-# This needs to be replaced with a smaller download file for speed.
-#
-sub get_stations {
-    die "Can't get stations without a lineup!" unless $opt_lineup;
-    die "Can't get stations without an email!" unless $opt_user;
-    die "Can't get stations without a password!" unless $opt_pass;
-    
-    my $guide_string=get_nice_gzip(
-        sprintf("http://www.whatsonindia.com/xmltv_download/filedeliver.aspx?formatname=%s&requester=%s&password=%s",
-                $opt_lineup,$opt_user,$opt_pass));
-
-    my $parser = XML::LibXML->new();
-    my $doc = $parser->parse_string( $guide_string );
-    my $root = $doc->getDocumentElement;
-
-    foreach my $station ($root->findnodes('channel')) {
-       my $id  = $station->getAttribute('id');
-       my $name= $station->getElementsByTagName('display-name')->[0]->getFirstChild->getData;
-       $guide_data->{channel}{$id}{'display-name'}=$name;
-    }
-
-    die "Error fetching channel list for lineup\n" unless $guide_data->{channel};
-} # get_stations
-
-#
-# --configure
-#
-if ($opt_configure) {
-    my %station_map=();
-
-    say("
-Registration is required in advance. 
-
-  1.	Connect to http://www.whatsonindia.com and register yourself
-  2.	During registration, please check the 'sign-up for XMLTV' option (Under TV Preferences)
-  3.	Once done, click on submit your information.
-
-    ");
-    $opt_user=ask("email ($opt_user):")|| $opt_user || die "ERROR: What's On India Registration Required\n";
-    $opt_user=lc($opt_user); # force lower-case on username
-    $opt_pass=ask_password("Password (default:<keep>,):")|| $opt_pass;
-
-    die "*ERROR* email not specified. Please run --configure\n" unless $opt_user;
-    die "*ERROR* Password not specified. Please run --configure\n" unless $opt_pass;
-    
-    get_lineups();
-    my @choices=sort keys %lineups;
-    my $val = $opt_lineup || $choices[0];
-    $val = ask_choice("\nWhich Lineup? ($opt_lineup)",$val,@choices);
-    $opt_lineup=$val;
-    
-#
-# get station names
-#
-    get_stations();
-    foreach (keys %{$guide_data->{channel}}) {
-        $station_map{$guide_data->{channel}->{$_}->{'display-name'}}=$_;
-    }
-
-# Construct the questions
-    my @questions;
-    foreach (sort keys %station_map)   {
-        push @questions, sprintf("Add channel %-20s :",$_);
-    }
-
-# Ask the questions
-    my @answers = ask_many_boolean( 1, @questions );
-
-# Save the answers
-    my $i=0;
-    foreach (sort keys %station_map)
-    {
-        $chan_config{$station_map{$_}} = $answers[$i];
-        $i++;
-    }
-#
-# ask about auto-config for the config file
-#
-    my $config_autoconfig=0;
-    if (ask_boolean("Lineups change periodically. The default for new stations is to notify you.\n".
-                    "Do you want new stations to be automatically added?")) {
-       $config_autoconfig="add";
-    }
-    elsif (ask_boolean("Do you want new stations to be ignored?")) {
-       $config_autoconfig="ignore";
-    }
-
-#
-# Write the config file
-#
-    open(CONF,">$config_file") or die "ERROR: can't open config file: $config_file\n";
-    print CONF "lineup:   $opt_lineup\n";
-    print CONF "user:   $opt_user\n";
-    print CONF "pass:   $opt_pass\n";
-    print CONF "auto-config: $config_autoconfig\n" if $config_autoconfig;
-
-    my %chan_found=();
-    foreach (sort keys %chan_config) {
-       print CONF ( $chan_config{$_} ? '' : 'not ' ), "channel: $_\n";
-       $chan_found{$_} = 1;
-    }
-
-    foreach (sort keys %chan_config)
-    {
-        next if $chan_found{$_};
-        print STDERR "Channel '$_' no longer exists\n";
-    }
-    close CONF;
-    say( 'Configuration complete!' );
-    exit 0;
-} # --configure channel list
-
-#
-# --list-lineup mode
-#
-if ($opt_list_lineups)
+# Return a string containing an xml-document with <channel>-elements
+# for all available channels of selected lineup
+sub list_channels
 {
-    get_lineups();
-    foreach (sort keys %lineups) {
-        printf STDOUT "$_\n";
-        }
-    exit 0;
+	# $opt hold command line parameters, if any
+	my( $conf, $opt ) = @_;
+	
+	my $url = buildURL( 'get_channels', $conf, $opt );
+	
+	# fetch list of channels 
+	my $channels = get( $url );
+	my $data = transform_channel( $channels );
+
+	# return XML string
+	return $data;
 }
 
+# Transform comma separated string to XMLTV channel list in string form
+sub transform_channel
+{
+	my ( $str ) = @_;
+	my @array = split( ",", $str);
+	my $result;
+	my $writer = new XMLTV::Writer(OUTPUT => \$result);
+	$writer->start({'generator-info-name' => 'tv_grab_in'});
 
-#
-# Process listings
-#
+	foreach my $name (@array) {
+		my %channel = (id => "$name", 
+			'display-name' => [ [ "$name", "en" ] ]);
+		$writer->write_channel( \%channel );
+	}
+	$writer->end();
+	#printf $result;
 
-die "Can't get stations without a lineup!" unless $opt_lineup;
-die "Can't get stations without an email!" unless $opt_user;
-die "Can't get stations without a password!" unless $opt_pass;
-
-$guide_data=get_nice_gzip(
-    sprintf("http://www.whatsonindia.com/xmltv_download/filedeliver.aspx?formatname=%s&requester=%s&password=%s",
-            $opt_lineup,$opt_user,$opt_pass));
-
-#
-# open output file
-# we probably should use XMLTV:Writer, but the data should already be in XMLTV
-# format and this is so much more efficient than parsing it
-#
-    if (defined $opt_output){
-        open(STDOUT,">$opt_output") or die "ERROR: cannot write to $opt_output\n";
-    }
-    print '<?xml version="1.0" encoding="utf-8"?>'."\n";
-    print '<tv source-info-url="http://zipazap.com/" source-info-name="Whats on India" generator-info-name="XMLTV/$Id: tv_grab_in,v 1.13 2010/09/28 06:22:35 rmeden Exp $" generator-info-url="http://www.xmltv.org/">'."\n";
-
-#
-# set up start and stop filter (aka earliest start time and latest start time)
-#
-&Date_Init("TZ=Asia/Kolkata");
-my $date=ParseDate( 'MIDNIGHT' );
-
-my $deltastart = ParseDateDelta("+$opt_offset days");
-my $deltastop  = ParseDateDelta("+".$opt_offset+$opt_days." days");
-my $start=DateCalc($date,$deltastart); $start=~s/://g;  #UnixDate gives warnings, this works!
-my $stop =DateCalc($date,$deltastop ); $stop=~s/://g;
-
-print "<!-- programmes from $start to $stop -->\n";
-
-#
-# ok, let's walk through the data
-#
-unless ($opt_quiet) {
-    $bar = new XMLTV::ProgressBar('processing data',length($guide_data)+1);
+	return $result;
 }
-    my $guide_fh = new IO::Scalar \$guide_data;
-    my $skip=0;
-    my $count=0;
-    while (defined($_ = $guide_fh->getline)) {
-        $bar->update(tell($guide_fh)) if $bar && (++$count%1000==0);
-        next unless (/^ /); # ignore the <xml> and <tv> tags
-        if (/<channel id="(.+?)"/) {
-            $skip=0;
-            $skip=1 unless $chan_config{$1};
-            $skip=0 if $opt_list_channels;
-        } elsif (/<programme start=.(\d+).+channel="(.+?)"/) {
-            $skip=0;
-            $skip=1 if $opt_list_channels;
-            $skip=1 if $1 lt $start;
-            $skip=1 if $1 gt $stop;
-            $skip=1 unless $chan_config{$2};
-            $sched_count++ unless $skip;
-        };
 
-        print "$_" unless $skip;
-        }
-    $guide_fh->close;
+# Transform schedule JSON to XMLTV channel list in string form
+sub transform_program
+{
+	my ( $str, $ch) = @_;
+	my $result;
+	my $writer = new XMLTV::Writer(OUTPUT => \$result);
+	$writer->start({'generator-info-name' => 'tv_grab_in'});
 
-#
-# do some final clean-up
-#
-    print "</tv>\n";
-    $bar->update($#schedules+1) if $bar;
-    $bar->finish() if $bar;
+	#Write channels first
+	my $channels = XMLTV::parse($ch);
+	#print Dumper( $channels);
+	foreach ( @$channels[2] ) {
+		$writer->write_channels($_);
+	}
 
-    printf STDERR "\nDownloaded %d programs in %d seconds\n",$sched_count,time()-$start_time
-        unless $opt_quiet;
+	my $ptr = decode_json $str;
+	$ptr = $ptr->{"ScheduleGrid"}->{"channel"}; 
 
-exit(0);
+	foreach my $c (@$ptr) {
+		my $program = $c->{"programme"};
+		foreach my $p (@$program) {
 
+			my %prog = (channel =>  $c->{"-id"}, 
+				start => $p->{"start"},
+				stop => $p->{"stop"},
+				date => $p->{"date"},
+				title => [ [ $p->{"title"}, 'en' ] ]);
+			$writer->write_programme(\%prog);
+	}
+	}
+	$writer->end();
+	#printf $result;
+
+	return $result;
+}
+
+# build API URL for a given action
+sub buildURL
+{
+	
+	my( $action, $conf, $opt, $channels ) = @_;
+	my $url;
+	if ($action eq "get_channels") {
+		$url  = $webroot . "tvschannellist.cms?genrename=sports";#all";
+		return $url;
+	} elsif ($action eq "get_schedule") {
+		$channels =~ s/\ /%20/g ;
+		$url  = $webroot . "tvschedulejson.cms?channellist=" . $channels;
+	} else {
+		die "Invalid action\n";
+	}
+
+	if ($opt->{offset} +  $opt->{days} > 2 ) {
+		die "EPG supported only till next day\n"
+	}
+	
+	my ($sec,$min,$hour,$day,$month,$year,$wday,$yday,$isdst) = localtime();
+	my $datestring;
+	$year += 1900;
+	$month++;
+
+	if( $opt->{offset} > 0 ) {
+		# append offset
+		($year, $month, $day) = Add_Delta_Days($year, $month, $day,  $opt->{offset});
+	}
+	$datestring = sprintf "%04d%02d%02d0000", ($year, $month, $day);
+	$url .= "&fromdatetime=" .  $datestring;
+
+	if( $opt->{days} > 0 ) {
+		$opt->{days} = 1; #limited data available
+		# append days
+		($year, $month, $day) = Add_Delta_Days($year, $month, $day,  $opt->{days});
+		$datestring = sprintf "%04d%02d%02d0000", ($year, $month, $day);
+		$url .= "&todatetime=" .  $datestring;
+	}
+	#print($url);
+	
+	return $url;
+	
+}
