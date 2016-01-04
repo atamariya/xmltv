@@ -100,7 +100,7 @@ my( $opt, $conf ) = ParseOptions( {
      capabilities => [qw/baseline manualconfig apiconfig/],
      stage_sub => \&config_stage,
      listchannels_sub => \&list_channels,
-     version => '$Id: tv_grab_in,v 1.2 2015/06/27 00:30:54 knowledgejunkie Exp $',
+     version => '$Id: tv_grab_in,v 1.2 2015/06/27 00:30:54 atamariya Exp $',
      description => "India (timesofindia.indiatimes.com)",
 } );
 
@@ -111,7 +111,7 @@ my @channels = @{$conf->{channel}};
 my $data;
 $data->[1] = {'generator-info-name' => 'tv_grab_in'};
 
-while (my @next_n = splice @channels, 0, 1) {
+while (my @next_n = splice @channels, 0, 10) {
 	my $channels_str = join ",", @next_n;
 	my $url = buildURL( 'get_schedule', $conf, $opt, $channels_str );
 
@@ -230,16 +230,17 @@ sub transform_program
 	$ptr = $ptr->{"ScheduleGrid"}->{"channel"}; 
 
 	my $tz = "IST";
-	my (%ch, @progs);
+	my $lang = "en";
+	my ($encoding, $credits, $ch, $progs) = @$data;
 	foreach my $c (@$ptr) {
-		if (! $ch{$c->{"channelid"}}) {
-			$ch{$c->{"channelid"}} = { id => $c->{"channelid"}, 
-				'display-name' => [ [ $c->{"display-name"}, "en" ] ]};
+		if (! %$ch{$c->{"channelid"}}) {
+			$ch->{$c->{"channelid"}} = { id => $c->{"channelid"}, 
+				icon => [ { src => $c->{"channellogourl"}} ],
+				'display-name' => [ [ $c->{"display-name"}, $lang ] ]};
 		}
 		my $program = $c->{"programme"};
 		foreach my $p (@$program) {
 
-			my $lang = "en";
 			my %prog = (channel =>  $c->{"channelid"}, 
 				start => "$p->{'start'} $tz",
 				stop => "$p->{'stop'} $tz",
@@ -248,13 +249,13 @@ sub transform_program
 				icon => [ { src => $p->{"programmeurl"}} ],
 				date => $p->{"date"},
 				title => [ [ $p->{"title"}, $lang ] ]);
-			push @progs, \%prog;
+			push @$progs, \%prog;
 		}
 	}
 
-	$data->[2] = \%ch;
-	push $data->[3]= \@progs;
-	print Dumper $data;
+	$data->[2] = $ch;
+	$data->[3] = $progs;
+	#print Dumper $ch;
 }
 
 # build API URL for a given action
