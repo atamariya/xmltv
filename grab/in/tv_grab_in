@@ -106,27 +106,22 @@ my( $opt, $conf ) = ParseOptions( {
 
 # make URL
 my @channels = @{$conf->{channel}};
-my $channels_str = join ",", @channels;
-my $url = buildURL( 'get_schedule', $conf, $opt, $channels_str );
 
-# fetch data
-my $res = get( $url );
-my $res1 = transform_channel($channels_str);
-$res = transform_program($res, $res1);
+# my ($encoding, $credits, $ch, $progs) = @$data;
+my $data;
+$data->[1] = {'generator-info-name' => 'tv_grab_in'};
 
-# validate XML
-my $parser = new XML::LibXML;
-eval { $parser->parse_string( $res )->is_valid };
+while (my @next_n = splice @channels, 0, 1) {
+	my $channels_str = join ",", @next_n;
+	my $url = buildURL( 'get_schedule', $conf, $opt, $channels_str );
 
-if ($@) {
-	#XML invalid - assume error and print $res to STDERR
-	print STDERR "Invalid XML: $res \n";
-	exit 1;
-} else {
-	# XML Valid, print to STDOUT and let XMLTV::Options handle it
-	print $res;
-	exit 0;
+	# fetch data
+	my $res = get( $url );
+	#print $res;
+	transform_program($res);
 }
+
+XMLTV::write_data($data);
 
 sub config_stage
 {
@@ -227,31 +222,25 @@ sub transform_channel
 	return $result;
 }
 
-# Transform schedule JSON to XMLTV channel list in string form
+# Transform schedule JSON to XMLTV channel list in $data 
 sub transform_program
 {
-	my ( $str, $ch) = @_;
-	my $result;
-	my $writer = new XMLTV::Writer(OUTPUT => \$result);
-	$writer->start({'generator-info-name' => 'tv_grab_in'});
-
-	#Write channels first
-	my $channels = XMLTV::parse($ch);
-	#print Dumper( $channels);
-	foreach ( @$channels[2] ) {
-		$writer->write_channels($_);
-	}
-
+	my ( $str ) = @_;
 	my $ptr = decode_json $str;
 	$ptr = $ptr->{"ScheduleGrid"}->{"channel"}; 
 
 	my $tz = "IST";
+	my (%ch, @progs);
 	foreach my $c (@$ptr) {
+		if (! $ch{$c->{"channelid"}}) {
+			$ch{$c->{"channelid"}} = { id => $c->{"channelid"}, 
+				'display-name' => [ [ $c->{"display-name"}, "en" ] ]};
+		}
 		my $program = $c->{"programme"};
 		foreach my $p (@$program) {
 
 			my $lang = "en";
-			my %prog = (channel =>  $c->{"-id"}, 
+			my %prog = (channel =>  $c->{"channelid"}, 
 				start => "$p->{'start'} $tz",
 				stop => "$p->{'stop'} $tz",
 				category => [ [$p->{"subgenre"}, $lang] ],
@@ -259,13 +248,13 @@ sub transform_program
 				icon => [ { src => $p->{"programmeurl"}} ],
 				date => $p->{"date"},
 				title => [ [ $p->{"title"}, $lang ] ]);
-			$writer->write_programme(\%prog);
+			push @progs, \%prog;
+		}
 	}
-	}
-	$writer->end();
-	#printf $result;
 
-	return $result;
+	$data->[2] = \%ch;
+	push $data->[3]= \@progs;
+	print Dumper $data;
 }
 
 # build API URL for a given action
@@ -286,7 +275,7 @@ sub buildURL
 
 	if ($opt->{offset} +  $opt->{days} > 2 ) {
 		$opt->{days} = 1;
-		#die "EPG supported only till next day\n"
+		warn "EPG supported only till next day\n";
 	}
 	
 	my ($sec,$min,$hour,$day,$month,$year,$wday,$yday,$isdst) = localtime();
