@@ -104,21 +104,30 @@ my( $opt, $conf ) = ParseOptions( {
      description => "India (timesofindia.indiatimes.com)",
 } );
 
-# make URL
+# Get all the configured channels 
 my @channels = @{$conf->{channel}};
 
 # my ($encoding, $credits, $ch, $progs) = @$data;
 my $data;
+$data->[0] = "UTF-8";
 $data->[1] = {'generator-info-name' => 'tv_grab_in'};
 
+# Process 10 channels at a time
 while (my @next_n = splice @channels, 0, 10) {
 	my $channels_str = join ",", @next_n;
-	my $url = buildURL( 'get_schedule', $conf, $opt, $channels_str );
 
-	# fetch data
-	my $res = get( $url );
-	#print $res;
-	transform_program($res);
+	# Process 1 day at a time
+	do {
+		my $url = buildURL( 'get_schedule', $conf, $opt, $channels_str );
+
+		# fetch data
+		my $res = get( $url );
+		#print $res;
+		transform_program($res);
+
+		$opt->{offset}++;
+
+	} while (--$opt->{days} > 0);
 }
 
 XMLTV::write_data($data);
@@ -229,7 +238,7 @@ sub transform_program
 	my $ptr = decode_json $str;
 	$ptr = $ptr->{"ScheduleGrid"}->{"channel"}; 
 
-	my $tz = "IST";
+	my $tz = "+0530";
 	my $lang = "en";
 	my ($encoding, $credits, $ch, $progs) = @$data;
 	foreach my $c (@$ptr) {
@@ -273,14 +282,21 @@ sub buildURL
 	} else {
 		die "Invalid action\n";
 	}
-
-	if ($opt->{offset} +  $opt->{days} > 2 ) {
-		$opt->{days} = 1;
-		warn "EPG supported only till next day\n";
-	}
 	
+	my ($from, $to) = get_dates($opt);
+	$url .= "&fromdatetime=" .  $from;
+	$url .= "&todatetime=" .  $to;
+	#print($url . "\n");
+	
+	return $url;
+}
+
+# Return from and to date strings based on offset and days
+sub get_dates
+{
+	my ($opt) = @_;
 	my ($sec,$min,$hour,$day,$month,$year,$wday,$yday,$isdst) = localtime();
-	my $datestring;
+	my ($from, $to);
 	$year += 1900;
 	$month++;
 
@@ -288,18 +304,13 @@ sub buildURL
 		# append offset
 		($year, $month, $day) = Add_Delta_Days($year, $month, $day,  $opt->{offset});
 	}
-	$datestring = sprintf "%04d%02d%02d0000", ($year, $month, $day);
-	$url .= "&fromdatetime=" .  $datestring;
+	$from = sprintf "%04d%02d%02d0000", ($year, $month, $day);
 
 	if( $opt->{days} > 0 ) {
-		$opt->{days} = 1; #limited data available
 		# append days
-		($year, $month, $day) = Add_Delta_Days($year, $month, $day,  $opt->{days});
-		$datestring = sprintf "%04d%02d%02d0000", ($year, $month, $day);
-		$url .= "&todatetime=" .  $datestring;
+		#($year, $month, $day) = Add_Delta_Days($year, $month, $day,  $opt->{days});
+		($year, $month, $day) = Add_Delta_Days($year, $month, $day, 1);
+		$to = sprintf "%04d%02d%02d0000", ($year, $month, $day);
 	}
-	#print($url);
-	
-	return $url;
-	
+	return ($from, $to);
 }
