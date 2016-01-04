@@ -436,7 +436,7 @@ my @opt_components
      },
 
      { name     => 'tv_grab_in',
-       blurb => 'Grabber for India (zipazap.com)',
+       blurb => 'Grabber for India (timesofindia.indiatimes.com)',
        exes     => [ 'grab/in/tv_grab_in' ],
        prereqs => { 'XML::LibXML' => 0,
                     'IO::Scalar' => 0,

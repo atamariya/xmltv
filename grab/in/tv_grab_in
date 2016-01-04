@@ -245,15 +245,17 @@ sub transform_program
 	my $ptr = decode_json $str;
 	$ptr = $ptr->{"ScheduleGrid"}->{"channel"}; 
 
+	my $tz = "IST";
 	foreach my $c (@$ptr) {
 		my $program = $c->{"programme"};
 		foreach my $p (@$program) {
 
 			my $lang = "en";
 			my %prog = (channel =>  $c->{"-id"}, 
-				start => $p->{"start"},
-				stop => $p->{"stop"},
+				start => "$p->{'start'} $tz",
+				stop => "$p->{'stop'} $tz",
 				category => [ [$p->{"subgenre"}, $lang] ],
+				#"episode-num" => [ [ 1, "onscreen"] ],
 				icon => [ { src => $p->{"programmeurl"}} ],
 				date => $p->{"date"},
 				title => [ [ $p->{"title"}, $lang ] ]);
@@ -273,7 +275,7 @@ sub buildURL
 	my( $action, $conf, $opt, $channels ) = @_;
 	my $url;
 	if ($action eq "get_channels") {
-		$url  = $webroot . "tvschannellist.cms?genrename=sports";#all";
+		$url  = $webroot . "tvschannellist.cms?genrename=all";
 		return $url;
 	} elsif ($action eq "get_schedule") {
 		$channels =~ s/\ /%20/g ;
@@ -283,7 +285,8 @@ sub buildURL
 	}
 
 	if ($opt->{offset} +  $opt->{days} > 2 ) {
-		die "EPG supported only till next day\n"
+		$opt->{days} = 1;
+		#die "EPG supported only till next day\n"
 	}
 	
 	my ($sec,$min,$hour,$day,$month,$year,$wday,$yday,$isdst) = localtime();
