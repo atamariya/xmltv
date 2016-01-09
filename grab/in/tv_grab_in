@@ -116,6 +116,8 @@ $data->[1] = {'generator-info-name' => 'tv_grab_in'};
 while (my @next_n = splice @channels, 0, 10) {
 	my $channels_str = join ",", @next_n;
 
+	my $days = $opt->{days};
+	my $offset = $opt->{offset};
 	# Process 1 day at a time
 	do {
 		my $url = buildURL( 'get_schedule', $conf, $opt, $channels_str );
@@ -128,6 +130,8 @@ while (my @next_n = splice @channels, 0, 10) {
 		$opt->{offset}++;
 
 	} while (--$opt->{days} > 0);
+	$opt->{days} = $days;
+	$opt->{offset} = $offset;
 }
 
 XMLTV::write_data($data);
@@ -303,8 +307,9 @@ sub get_dates
 	if( $opt->{offset} > 0 ) {
 		# append offset
 		($year, $month, $day) = Add_Delta_Days($year, $month, $day,  $opt->{offset});
+		($min, $hour) = (0, 0);
 	}
-	$from = sprintf "%04d%02d%02d0000", ($year, $month, $day);
+	$from = sprintf "%04d%02d%02d%02d%02d", ($year, $month, $day, $hour, $min);
 
 	if( $opt->{days} > 0 ) {
 		# append days
